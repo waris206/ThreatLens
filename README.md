@@ -19,7 +19,7 @@ ThreatLens is a full-stack, real-time malware triage platform that automates fil
 |---|---|
 | **Sentinel Protocol Scoring** | Deterministic scoring remains binding. AI agents explain the Hard Risk Score and cannot override it. |
 | **YARAify Integration** | Optional abuse.ch YARAify lookup/scan via `YARAIFY_AUTH_KEY`, with graceful zero-impact fallback when unavailable. |
-| **MalwareBazaar Lookup** | Hash reputation lookup against MalwareBazaar. Confirmed known malware adds the highest-confidence deterministic signal. |
+| **MalwareBazaar Lookup** | Optional hash reputation lookup against MalwareBazaar via `MALWAREBAZAAR_AUTH_KEY`. Confirmed known malware adds the highest-confidence deterministic signal. |
 | **Simulated Sandbox Analysis** | PE import mapping to behaviors such as process injection, persistence, credential access, network activity, and ransomware indicators. |
 | **MITRE ATT&CK Reporting** | Sandbox behaviors are mapped into ATT&CK techniques and shown in the frontend report. |
 | **Email (.eml) Triage** | Parses EML metadata, URLs, and attachments. Attachments run through the existing forensic pipeline. |
@@ -78,25 +78,32 @@ Never commit `project/.env`. It is ignored by Git and should hold real API keys,
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  ThreatLens React Dashboard             │
-│  FileUploadZone → FileDetailsCard (Risk Score + IAT)    │
-│  LiveTerminal (SSE stream) → InvestigationTimeline      │
-└────────────────────────┬────────────────────────────────┘
-                         │ POST /upload + GET /stream
-┌────────────────────────▼────────────────────────────────┐
-│               ThreatLens Express Backend (port 5000)    │
-│                                                         │
-│  1. SHA-256 + Entropy + Magic Bytes + Strings + EXIF    │
-│  2. PE Parser → IAT extraction                          │
-│  3. Authenticode Digital Signature (node-forge ASN.1)   │
-│  4. VirusTotal v3 lookup                                │
-│  5. YARA-Lite scan (5 rules, validate callbacks)        │
-│  6. ═══ Hard Risk Scorer (deterministic, pre-AI) ═══    │
-│  7. JSON response → frontend renders Risk Score card    │
-│  8. SSE stream → Agent 1 → Agent 2 → Agent 3 (AI)       │
-│  9. HTML report generation + download link              │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                    ThreatLens React Dashboard                       │
+│                                                                    │
+│  File / Email Upload  → Risk + Reputation Cards → MITRE Table       │
+│  LiveTerminal         → Agent progress + report download            │
+│  SOC Portal           → Admin stats, live feed, quarantine actions   │
+└───────────────────────────────┬────────────────────────────────────┘
+                                │
+                                │ POST /upload
+                                │ POST /analyze/email
+                                │ GET  /api/swarm-stream
+                                │ GET  /admin/*
+                                │ POST /api/v1/scan
+┌───────────────────────────────▼────────────────────────────────────┐
+│                 ThreatLens Express Backend (port 5000)              │
+│                                                                    │
+│  1. File identity: SHA-256, entropy, magic bytes, strings, EXIF      │
+│  2. Local static analysis: PE parser, IAT, Authenticode, YARA-Lite   │
+│  3. Reputation: VirusTotal, YARAify, MalwareBazaar                   │
+│  4. Simulated sandbox: import behaviors + MITRE ATT&CK mapping       │
+│  5. ═══ Hard Risk Scorer (deterministic, binding, pre-AI) ═══        │
+│  6. Analysis store: admin feed, stats, quarantine/review flags        │
+│  7. Optional alerts: Slack / Discord webhooks for HIGH risk           │
+│  8. AI swarm explains score: Static → OSINT → Sandbox → Lead          │
+│  9. HTML report generation + headless JSON API output                 │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -107,7 +114,9 @@ Never commit `project/.env`. It is ignored by Git and should hold real API keys,
 - **Backend:** Node.js, Express 5, Multer
 - **AI:** OpenRouter API (free tier)
 - **Threat Intel:** VirusTotal API v3
+- **Community Intel:** YARAify and MalwareBazaar via abuse.ch APIs
 - **Crypto:** node-forge (ASN.1 / PKCS#7 parsing)
+- **Email Parsing:** mailparser for `.eml` triage
 - **Security:** helmet, express-rate-limit, CORS
 - **Architecture:** Server-Sent Events (SSE) for real-time streaming
 
@@ -138,6 +147,7 @@ Create a `.env` file in the `project/` directory:
 OPENROUTER_API_KEY=your_openrouter_key
 VIRUSTOTAL_API_KEY=your_virustotal_key
 YARAIFY_AUTH_KEY=your_yaraify_auth_key
+MALWAREBAZAAR_AUTH_KEY=your_malwarebazaar_auth_key
 ADMIN_PIN=1337
 ADMIN_API_KEY=generate_a_long_random_admin_key
 API_KEY=generate_a_long_random_headless_api_key
@@ -169,21 +179,34 @@ Frontend runs on `http://localhost:5173`
 
 ```
 project/
-├── server.js            # Express backend — upload, forensics pipeline, AI orchestration
-├── forensics.js         # SHA-256, entropy, magic bytes, EXIF, Authenticode, VirusTotal
-├── riskScorer.js        # Deterministic Hard Risk Scorer (pre-AI)
-├── yaraEngine.js        # YARA-Lite signature scanning engine (5 rules)
-├── peParser.js          # Pure-JS PE binary parser (IAT extraction)
-├── vite.config.js       # Vite config (uploads/ ignored by watcher)
+├── server.js                    # Express backend: uploads, SSE, admin, API, email routes
+├── forensics.js                 # Entropy, magic bytes, strings, EXIF, Authenticode
+├── riskScorer.js                # Deterministic Hard Risk Scorer (binding, pre-AI)
+├── yaraEngine.js                # YARA-Lite signature scanning engine
+├── peParser.js                  # Pure-JS PE parser and import table extraction
+├── forensics/
+│   ├── yaraifyScanner.js        # Optional abuse.ch YARAify lookup/scan
+│   ├── malwareBazaar.js         # MalwareBazaar hash reputation lookup
+│   ├── sandboxAnalyzer.js       # Simulated sandbox behavior + MITRE ATT&CK mapping
+│   └── emlParser.js             # EML metadata, URL, and attachment parsing
+├── utils/
+│   └── webhookAlerter.js        # Optional Slack/Discord HIGH-risk alerts
+├── vite.config.js               # Vite config
 ├── src/
-│   ├── App.jsx          # Main app — upload flow, state management
+│   ├── App.jsx                  # Main app state, file/email upload flow, SOC overlay
 │   └── components/
-│       ├── Navbar.jsx           # Top nav with ThreatLens branding
-│       ├── FileUploadZone.jsx   # Drag-and-drop upload with mode selector
-│       ├── FileDetailsCard.jsx  # Risk score, YARA alerts, PE/IAT, signatures
-│       ├── LiveTerminal.jsx     # Real-time SSE agent output
-│       └── InvestigationTimeline.jsx  # Progress stages
-└── uploads/             # Generated HTML reports (auto-cleaned)
+│       ├── Navbar.jsx                 # Top nav + SOC Portal button
+│       ├── FileUploadZone.jsx         # File/email drag-drop + mode selector
+│       ├── FileDetailsCard.jsx        # Score, reputation, MITRE, PE/IAT, signatures
+│       ├── LiveTerminal.jsx           # SSE agent progress + report download
+│       ├── InvestigationTimeline.jsx  # Progress stages
+│       └── admin/
+│           ├── AdminPortal.jsx        # SOC overlay shell
+│           ├── AdminLogin.jsx         # PIN login
+│           ├── AdminDashboard.jsx     # Live analysis table + quarantine action
+│           ├── AdminStatsBar.jsx      # Daily scan statistics
+│           └── ThreatFeed.jsx         # Last 10 HIGH-risk detections
+└── uploads/                       # Generated HTML reports only
 ```
 
 ---
@@ -205,6 +228,17 @@ project/
 | YARA high hit | +25 | High severity rule triggered |
 | No YARA hits | −10 | Passed all automated signature screening |
 | Injection triad in IAT | +40 | VirtualAllocEx + WriteProcessMemory + CreateRemoteThread |
+| YARAify rule match | +30 | YARAify returned one or more community YARA matches |
+| YARAify multi-match | +20 | YARAify returned more than five matches |
+| YARAify known malware | +25 | YARAify/ClamAV context marks sample as known malware |
+| YARAify high-impact family | +20 | Family tag includes ransomware, RAT, stealer, or loader |
+| MalwareBazaar confirmed malware | +60 | SHA-256 exists in MalwareBazaar malware database |
+| Sandbox process injection | +35 | Simulated sandbox maps imports to process injection |
+| Sandbox persistence | +25 | Imports map to persistence behavior |
+| Sandbox defense evasion | +20 | Imports map to anti-analysis / evasion behavior |
+| Sandbox credential access | +30 | Imports map to credential access behavior |
+| Sandbox ransomware indicators | +40 | Imports map to encryption / drive traversal behavior |
+| Sandbox network communication | +15 | Imports map to network communication behavior |
 
 **Bands:** Score < 20 → **LOW** | 20–60 → **SUSPICIOUS** | > 60 → **HIGH**
 
