@@ -141,6 +141,9 @@ const HIGH_ENTROPY_FORMATS = new Set([
  * @param {string} params.magicBytes        e.g. '4D 5A 90 00'
  * @param {string|number} params.entropy    Shannon entropy (0-8)
  * @param {{ malicious: number, undetected: number }} params.virusTotal
+ * @param {{ matchCount: number, knownMalware: boolean, malwareFamilies: string[] }} params.yaraify
+ * @param {{ found: boolean }} params.malwareBazaar
+ * @param {{ detectedBehaviors: string[] }} params.sandbox
  * @param {{ signed: boolean, trusted: boolean }} params.digitalSignature
  * @param {object} params.peAnalysis        from peParser.js
  * @param {Array}  params.yaraHits          from yaraEngine.js
@@ -152,6 +155,9 @@ export function calculateRiskScore({
   magicBytes = '',
   entropy = 0,
   virusTotal = {},
+  yaraify = {},
+  malwareBazaar = {},
+  sandbox = {},
   digitalSignature = {},
   peAnalysis = {},
   yaraHits = [],
@@ -305,6 +311,115 @@ export function calculateRiskScore({
   }
 
   // ── Final classification ───────────────────────────────────────────────
+  // --- 7. YARAify Community Signals ---
+  const yaraifyMatchCount = yaraify?.matchCount ?? 0;
+  const yaraifyFamilies = Array.isArray(yaraify?.malwareFamilies) ? yaraify.malwareFamilies : [];
+
+  /**
+   * YARAIFY_RULE_MATCH adds +30 when abuse.ch YARAify returns any community
+   * YARA hit. This is stronger than local YARA-Lite because it reflects a
+   * curated public ruleset, but it remains below confirmed malware reputation.
+   */
+  if (yaraifyMatchCount > 0) {
+    score += 30;
+    breakdown.push({
+      signal: 'YARAIFY_RULE_MATCH',
+      delta: +30,
+      confidence: 'HIGH',
+      reason: `YARAify returned ${yaraifyMatchCount} community rule match(es)`,
+    });
+  }
+
+  /**
+   * YARAIFY_MULTI_MATCH adds +20 when more than five YARAify rules match,
+   * indicating independent signatures are converging on the same sample.
+   */
+  if (yaraifyMatchCount > 5) {
+    score += 20;
+    breakdown.push({
+      signal: 'YARAIFY_MULTI_MATCH',
+      delta: +20,
+      confidence: 'HIGH',
+      reason: `YARAify returned ${yaraifyMatchCount} matches (>5 threshold)`,
+    });
+  }
+
+  /**
+   * YARAIFY_KNOWN_MALWARE adds +25 when YARAify/ClamAV context identifies the
+   * sample as known malware. This is reputation-backed but still separate from
+   * MalwareBazaar's explicit malware database confirmation.
+   */
+  if (yaraify?.knownMalware) {
+    score += 25;
+    breakdown.push({
+      signal: 'YARAIFY_KNOWN_MALWARE',
+      delta: +25,
+      confidence: 'HIGH',
+      reason: 'YARAify indicates the sample is known malware',
+    });
+  }
+
+  /**
+   * YARAIFY_HIGH_IMPACT_FAMILY adds +20 when YARAify family tags include
+   * ransomware, RAT, stealer, or loader labels. These families are operationally
+   * high-impact and should be surfaced even before AI explanation.
+   */
+  if (yaraifyFamilies.some((family) => ['ransomware', 'rat', 'stealer', 'loader'].includes(String(family).toLowerCase()))) {
+    score += 20;
+    breakdown.push({
+      signal: 'YARAIFY_HIGH_IMPACT_FAMILY',
+      delta: +20,
+      confidence: 'HIGH',
+      reason: `High-impact malware family tag(s): ${yaraifyFamilies.join(', ')}`,
+    });
+  }
+
+  // --- 8. MalwareBazaar Confirmed Malware ---
+  /**
+   * KNOWN_MALWARE_CONFIRMED adds +60 when MalwareBazaar confirms the SHA-256
+   * hash exists in its malware database. This is the highest-confidence v3
+   * positive signal because it is an explicit known-malware reputation match.
+   */
+  if (malwareBazaar?.found) {
+    score += 60;
+    breakdown.push({
+      signal: 'KNOWN_MALWARE_CONFIRMED',
+      delta: +60,
+      confidence: 'CRITICAL',
+      reason: 'MalwareBazaar confirms this hash as known malware',
+    });
+  }
+
+  // --- 9. Simulated Sandbox Behaviors ---
+  const sandboxWeights = {
+    PROCESS_INJECTION: 35,
+    PERSISTENCE: 25,
+    DEFENSE_EVASION: 20,
+    CREDENTIAL_ACCESS: 30,
+    RANSOMWARE_INDICATORS: 40,
+    NETWORK_COMMUNICATION: 15,
+  };
+  const sandboxBehaviors = Array.isArray(sandbox?.detectedBehaviors) ? sandbox.detectedBehaviors : [];
+
+  for (const [behavior, weight] of Object.entries(sandboxWeights)) {
+    /**
+     * SANDBOX_BEHAVIOR signals add deterministic weight for PE imports that
+     * map to malware-like runtime behaviors. The sandbox is simulated static
+     * analysis, so each delta is explainable from imports and cannot be AI-set.
+     */
+    if (sandboxBehaviors.includes(behavior)) {
+      score += weight;
+      breakdown.push({
+        signal: `SANDBOX_${behavior}`,
+        delta: +weight,
+        confidence: 'MEDIUM',
+        reason: `Simulated sandbox detected ${behavior.replace(/_/g, ' ').toLowerCase()} behavior`,
+      });
+    }
+  }
+
+  score = Math.min(100, Math.max(0, score));
+
   let label;
   if (score < 20) label = 'LOW';
   else if (score <= 60) label = 'SUSPICIOUS';

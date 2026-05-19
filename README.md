@@ -1,4 +1,4 @@
-# ThreatLens v2.0 
+# ThreatLens v3.0 - Sentinel Protocol
 
 **AI-Driven Malware Triage & Deep Swarm Inspection**
 
@@ -12,6 +12,26 @@ If the image preview does not load on your device, open it directly: [View Demo 
 ThreatLens is a full-stack, real-time malware triage platform that automates file analysis by combining **deterministic risk scoring**, a **multi-agent AI swarm**, **YARA-Lite signature scanning**, **PE binary analysis**, **Authenticode signature verification**, and **global threat intelligence** — all streamed live to a React dashboard.
 
 ---
+
+## What's New in v3.0
+
+| Feature | Description |
+|---|---|
+| **Sentinel Protocol Scoring** | Deterministic scoring remains binding. AI agents explain the Hard Risk Score and cannot override it. |
+| **YARAify Integration** | Optional abuse.ch YARAify lookup/scan via `YARAIFY_AUTH_KEY`, with graceful zero-impact fallback when unavailable. |
+| **MalwareBazaar Lookup** | Hash reputation lookup against MalwareBazaar. Confirmed known malware adds the highest-confidence deterministic signal. |
+| **Simulated Sandbox Analysis** | PE import mapping to behaviors such as process injection, persistence, credential access, network activity, and ransomware indicators. |
+| **MITRE ATT&CK Reporting** | Sandbox behaviors are mapped into ATT&CK techniques and shown in the frontend report. |
+| **Email (.eml) Triage** | Parses EML metadata, URLs, and attachments. Attachments run through the existing forensic pipeline. |
+| **SOC Admin Portal** | PIN-protected dashboard with live scan feed, statistics, high-risk threat feed, and simulated quarantine actions. |
+| **Webhook Alerts** | Optional Slack/Discord high-risk alerts when webhook URLs are configured. |
+| **Headless API Mode** | `/api/v1/scan` supports CI/CD and automation with API-key protection and synchronous JSON results. |
+
+### SOC Admin PIN
+
+The SOC Portal button opens the admin dashboard login. The PIN is controlled by `ADMIN_PIN` in `project/.env`; if it is not set, local development defaults to `1337`. The PIN is only for the browser login gate. Admin API calls use `ADMIN_API_KEY`, which should be set to a long random value in production.
+
+Never commit `project/.env`. It is ignored by Git and should hold real API keys, webhook URLs, and private admin/API secrets.
 
 ## What's New in v2.0
 
@@ -117,6 +137,12 @@ Create a `.env` file in the `project/` directory:
 ```env
 OPENROUTER_API_KEY=your_openrouter_key
 VIRUSTOTAL_API_KEY=your_virustotal_key
+YARAIFY_AUTH_KEY=your_yaraify_auth_key
+ADMIN_PIN=1337
+ADMIN_API_KEY=generate_a_long_random_admin_key
+API_KEY=generate_a_long_random_headless_api_key
+SLACK_WEBHOOK_URL=
+DISCORD_WEBHOOK_URL=
 ```
 
 ### 4. Start the Servers

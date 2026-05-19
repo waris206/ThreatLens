@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Upload, FileIcon, Zap, ShieldCheck } from 'lucide-react';
+import { Upload, FileIcon, Zap, ShieldCheck, Mail } from 'lucide-react';
 
-const FileUploadZone = ({ onFileUpload, analysisMode, onModeChange }) => {
+const FileUploadZone = ({ onFileUpload, analysisMode, onModeChange, inputType, onInputTypeChange }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = (e) => {
@@ -35,6 +35,31 @@ const FileUploadZone = ({ onFileUpload, analysisMode, onModeChange }) => {
     <div className="space-y-4">
       {/* Mode Toggle */}
       <div className="bg-slate-900/50 border border-zinc-800 rounded-lg p-4">
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <button
+            onClick={() => onInputTypeChange('file')}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded border text-sm font-medium ${
+              inputType === 'file'
+                ? 'bg-cyber-blue/15 border-cyber-blue text-cyber-blue'
+                : 'bg-slate-800/50 border-zinc-700 text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            <FileIcon className="w-4 h-4" />
+            File
+          </button>
+          <button
+            onClick={() => onInputTypeChange('email')}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded border text-sm font-medium ${
+              inputType === 'email'
+                ? 'bg-cyber-green/15 border-cyber-green text-cyber-green'
+                : 'bg-slate-800/50 border-zinc-700 text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            <Mail className="w-4 h-4" />
+            Email (.eml)
+          </button>
+        </div>
+
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-medium text-slate-300">Analysis Mode</span>
           <span className="text-xs text-slate-500">
@@ -111,13 +136,15 @@ const FileUploadZone = ({ onFileUpload, analysisMode, onModeChange }) => {
 
             <div className="text-center">
               <h3 className="text-xl font-semibold text-slate-200 mb-2">
-                Drop File to Analyze
+                {inputType === 'email' ? 'Drop Email to Analyze' : 'Drop File to Analyze'}
               </h3>
               <p className="text-sm text-slate-400">
                 or click to browse your files
               </p>
               <p className="text-xs text-slate-500 mt-3">
-                Supported: Images, Documents, Executables, Archives (Max 50MB)
+                {inputType === 'email'
+                  ? 'Supported: RFC 822 .eml messages with attachments'
+                  : 'Supported: Images, Documents, Executables, Archives (Max 10MB)'}
               </p>
             </div>
 

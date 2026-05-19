@@ -1,4 +1,4 @@
-import { FileIcon, Hash, Weight, CheckCircle, Copy, BarChart3, ShieldAlert, ShieldCheck, Bug, AlertTriangle, Box, Shield } from 'lucide-react';
+import { FileIcon, Hash, Weight, CheckCircle, Copy, BarChart3, ShieldAlert, ShieldCheck, Bug, AlertTriangle, Box, Shield, ExternalLink, Mail, Radar } from 'lucide-react';
 import { useState } from 'react';
 
 const severityColor = {
@@ -28,6 +28,7 @@ const FileDetailsCard = ({ file }) => {
   };
 
   const copyToClipboard = () => {
+    if (!file.sha256) return;
     navigator.clipboard.writeText(file.sha256);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -76,6 +77,33 @@ const FileDetailsCard = ({ file }) => {
         </div>
       </div>
 
+      {file.emailAnalysis && (
+        <div className="border border-cyber-blue/30 bg-cyber-blue/5 rounded p-4">
+          <div className="flex items-center gap-2 mb-3 text-cyber-blue">
+            <Mail className="w-4 h-4" />
+            <span className="text-sm font-bold tracking-wider">EMAIL TRIAGE</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+              <div className="text-slate-500 mb-1">Subject</div>
+              <div className="text-slate-200">{file.emailAnalysis.emailMetadata?.subject || 'No subject'}</div>
+            </div>
+            <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+              <div className="text-slate-500 mb-1">From</div>
+              <div className="text-slate-200">{file.emailAnalysis.emailMetadata?.from?.join(', ') || 'Unknown'}</div>
+            </div>
+            <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+              <div className="text-slate-500 mb-1">Attachments</div>
+              <div className="text-slate-200">{file.emailAnalysis.attachmentResults?.length || 0} total, {file.emailAnalysis.suspiciousAttachments || 0} suspicious</div>
+            </div>
+            <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+              <div className="text-slate-500 mb-1">URLs</div>
+              <div className="text-slate-200">{file.emailAnalysis.urlResults?.length || 0} total, {file.emailAnalysis.suspiciousUrls || 0} suspicious</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="border-t border-zinc-800 pt-4 space-y-4">
         {/* ── Hard Risk Score ────────────────────────────────────── */}
         {file.riskScore && (
@@ -85,6 +113,11 @@ const FileDetailsCard = ({ file }) => {
               <span className="text-sm font-medium text-slate-300">Hard Risk Score</span>
             </div>
             <div className="bg-slate-950 border border-zinc-800 rounded p-4">
+              {file.malwareBazaar?.found && (
+                <div className="mb-3 rounded border border-red-400/50 bg-red-400/15 px-3 py-2 text-xs font-bold tracking-wider text-red-300">
+                  KNOWN MALWARE - MalwareBazaar confirmed this SHA-256 hash
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <span className={`text-3xl font-bold tabular-nums ${
@@ -120,17 +153,31 @@ const FileDetailsCard = ({ file }) => {
               <Hash className="w-4 h-4 text-slate-400" />
               <span className="text-sm font-medium text-slate-300">SHA-256 Hash</span>
             </div>
-            <button
-              onClick={copyToClipboard}
-              className="flex items-center space-x-1 text-xs text-slate-400 hover:text-cyber-green transition-colors"
-            >
-              <Copy className="w-3 h-3" />
-              <span>{copied ? 'Copied!' : 'Copy'}</span>
-            </button>
+            {file.sha256 && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={copyToClipboard}
+                  className="flex items-center space-x-1 text-xs text-slate-400 hover:text-cyber-green transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{copied ? 'Copied!' : 'Copy SHA256'}</span>
+                </button>
+                <a
+                  href={`https://bazaar.abuse.ch/browse.php?search=sha256%3A${file.sha256}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center space-x-1 text-xs text-slate-400 hover:text-red-300 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Submit to MalwareBazaar</span>
+                </a>
+              </div>
+            )}
           </div>
           <div className="bg-slate-950 border border-zinc-800 rounded p-3 overflow-x-auto">
             <code className="text-xs text-cyber-green font-mono break-all">
               {file.sha256}
+              {!file.sha256 && 'N/A'}
             </code>
           </div>
         </div>
@@ -178,6 +225,42 @@ const FileDetailsCard = ({ file }) => {
               </code>
               {file.virusTotal.note && (
                 <div className="text-xs text-slate-500 mt-1 font-mono">{file.virusTotal.note}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {(file.yaraify || file.malwareBazaar) && (
+          <div>
+            <div className="flex items-center space-x-2 mb-2">
+              <Radar className="w-4 h-4 text-slate-400" />
+              <span className="text-sm font-medium text-slate-300">V3 Reputation Intelligence</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {file.yaraify && (
+                <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+                  <div className="text-xs font-semibold text-cyber-blue mb-1">YARAify</div>
+                  <div className={`text-xs font-mono ${file.yaraify.matchCount > 0 ? 'text-red-400' : 'text-cyber-green'}`}>
+                    Matches: {file.yaraify.matchCount ?? 0}
+                  </div>
+                  {file.yaraify.malwareFamilies?.length > 0 && (
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      Families: {file.yaraify.malwareFamilies.join(', ')}
+                    </div>
+                  )}
+                  {file.yaraify.note && <div className="text-[11px] text-slate-500 mt-1">{file.yaraify.note}</div>}
+                </div>
+              )}
+              {file.malwareBazaar && (
+                <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+                  <div className="text-xs font-semibold text-red-300 mb-1">MalwareBazaar</div>
+                  <div className={`text-xs font-mono ${file.malwareBazaar.found ? 'text-red-400' : 'text-cyber-green'}`}>
+                    {file.malwareBazaar.found ? 'Known malware found' : 'Hash not found'}
+                  </div>
+                  {file.malwareBazaar.signature && (
+                    <div className="text-[11px] text-slate-400 mt-1">Signature: {file.malwareBazaar.signature}</div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -289,6 +372,46 @@ const FileDetailsCard = ({ file }) => {
             </div>
             <div className="bg-slate-950 border border-zinc-800 rounded p-3">
               <span className="text-xs text-slate-500">{peData.error || 'Not a PE executable'}</span>
+            </div>
+          </div>
+        )}
+
+        {file.sandbox && (
+          <div>
+            <div className="flex items-center space-x-2 mb-2">
+              <Radar className="w-4 h-4 text-slate-400" />
+              <span className="text-sm font-medium text-slate-300">Simulated Sandbox & MITRE ATT&CK</span>
+            </div>
+            <div className="bg-slate-950 border border-zinc-800 rounded p-3">
+              <div className="flex flex-wrap gap-1 mb-3">
+                {(file.sandbox.detectedBehaviors || []).length === 0 ? (
+                  <span className="text-xs text-cyber-green">No mapped behaviors detected</span>
+                ) : file.sandbox.detectedBehaviors.map((behavior) => (
+                  <span key={behavior} className="text-[10px] px-2 py-1 rounded border border-red-400/30 bg-red-400/10 text-red-300">
+                    {behavior}
+                  </span>
+                ))}
+              </div>
+              {(file.sandbox.mitreAttackTechniques || []).length > 0 && (
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-zinc-800">
+                      <th className="text-left py-2">Technique ID</th>
+                      <th className="text-left py-2">Name</th>
+                      <th className="text-left py-2">Tactic</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {file.sandbox.mitreAttackTechniques.map((technique) => (
+                      <tr key={technique.id} className="border-b border-zinc-900">
+                        <td className="py-2 font-mono text-red-300">{technique.id}</td>
+                        <td className="py-2 text-slate-300">{technique.name}</td>
+                        <td className="py-2 text-slate-400">{technique.tactic}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         )}

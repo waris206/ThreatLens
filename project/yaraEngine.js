@@ -91,6 +91,7 @@ const YARA_RULES = [
     id: 'PE_SUSPICIOUS_IMPORTS',
     name: 'Process Injection Triad (IAT)',
     severity: 'high',
+    requiresPE: true,
     description:
       'Detects the classic process injection triad: VirtualAllocEx + WriteProcessMemory + ' +
       'CreateRemoteThread. ALL THREE must be present to trigger — individual benign APIs are ignored.',
@@ -152,9 +153,12 @@ export function scanWithYaraRules(buffer) {
 
   // 'binary' encoding preserves all byte values as Latin-1 code-points
   const text = buffer.toString('binary');
+  const isPE = buffer.length >= 2 && buffer.readUInt16LE(0) === 0x5A4D;
   const hits = [];
 
   for (const rule of YARA_RULES) {
+    if (rule.requiresPE && !isPE) continue;
+
     /** @type {Array<{ pattern: string, offset: number, snippet: string, patternIdx: number }>} */
     const ruleMatches = [];
 
@@ -250,5 +254,6 @@ export function getRuleDefinitions() {
     description: r.description,
     patternCount: r.patterns.length,
     condition: r.condition,
+    requiresPE: Boolean(r.requiresPE),
   }));
 }

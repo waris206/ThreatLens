@@ -1,21 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal, Activity, Download } from 'lucide-react';
+import { Terminal, Activity, Download, CheckCircle2 } from 'lucide-react';
 
-// Agent colour scheme
 const AGENT_COLORS = {
-  1: { label: 'Agent 1 — Static Analyst',    text: 'text-cyan-400',    border: 'border-cyan-400/40',    bg: 'bg-cyan-400/5',  dot: 'bg-cyan-400' },
-  2: { label: 'Agent 2 — Threat OSINT',      text: 'text-amber-400',   border: 'border-amber-400/40',   bg: 'bg-amber-400/5', dot: 'bg-amber-400' },
-  3: { label: 'Agent 3 — Lead Investigator',  text: 'text-emerald-400', border: 'border-emerald-400/40', bg: 'bg-emerald-400/5', dot: 'bg-emerald-400' },
+  1: { label: 'Agent 1 - Static Analyst', text: 'text-cyan-400', border: 'border-cyan-400/40', bg: 'bg-cyan-400/5', dot: 'bg-cyan-400' },
+  2: { label: 'Agent 2 - Threat OSINT', text: 'text-amber-400', border: 'border-amber-400/40', bg: 'bg-amber-400/5', dot: 'bg-amber-400' },
+  3: { label: 'Agent 3 - Sandbox Analyst', text: 'text-red-400', border: 'border-red-400/40', bg: 'bg-red-400/5', dot: 'bg-red-400' },
+  4: { label: 'Agent 4 - Lead Investigator', text: 'text-emerald-400', border: 'border-emerald-400/40', bg: 'bg-emerald-400/5', dot: 'bg-emerald-400' },
 };
 
-const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
-  // Each segment: { agentId, agentName, text }
+const LiveTerminal = ({ isActive, analysisMode }) => {
   const [segments, setSegments] = useState([]);
   const [currentAgent, setCurrentAgent] = useState(null);
   const [reportDownloadUrl, setReportDownloadUrl] = useState(null);
   const terminalRef = useRef(null);
 
-  // Clear terminal when a new analysis starts
   useEffect(() => {
     if (isActive) {
       setSegments([]);
@@ -28,18 +26,17 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
     const eventSource = new EventSource(`${apiUrl}/api/swarm-stream`);
 
-    // Default message handler — streaming text tokens
     eventSource.onmessage = (event) => {
       const data = event.data;
       if (!data || data === '[DONE]') return;
 
+      if (analysisMode === 'v2') return;
+
       setSegments((prev) => {
         const updated = [...prev];
         if (updated.length === 0) {
-          // No agent header yet (v1 mode) — create a default segment
-          updated.push({ agentId: null, agentName: null, text: data });
+          updated.push({ agentId: null, agentName: null, text: data, status: 'working' });
         } else {
-          // Append to the latest segment
           const last = updated[updated.length - 1];
           updated[updated.length - 1] = { ...last, text: last.text + data };
         }
@@ -47,14 +44,13 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
       });
     };
 
-    // Agent lifecycle events (v2 mode)
     eventSource.addEventListener('agentStart', (event) => {
       try {
         const payload = JSON.parse(event.data);
         setCurrentAgent(payload);
         setSegments((prev) => [
           ...prev,
-          { agentId: payload.id, agentName: payload.name, text: '' },
+          { agentId: payload.id, agentName: payload.name, text: 'Working...', status: 'working' },
         ]);
       } catch (_) {}
     });
@@ -62,12 +58,15 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
     eventSource.addEventListener('agentDone', (event) => {
       try {
         const payload = JSON.parse(event.data);
-        // If the finished agent is the current one, clear active state
         setCurrentAgent((cur) => (cur?.id === payload.id ? null : cur));
+        setSegments((prev) => prev.map((seg) => (
+          seg.agentId === payload.id
+            ? { ...seg, text: 'Done', status: 'done' }
+            : seg
+        )));
       } catch (_) {}
     });
 
-    // Report download event
     eventSource.addEventListener('fileReady', (event) => {
       try {
         const payload = JSON.parse(event.data);
@@ -83,20 +82,18 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
     };
 
     return () => eventSource.close();
-  }, []);
+  }, [analysisMode]);
 
-  // Auto-scroll
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [segments]);
 
-  const hasContent = segments.some((s) => s.text.length > 0);
+  const hasContent = segments.length > 0;
 
   return (
     <div className="bg-slate-900 border border-zinc-800 rounded-lg flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-slate-950">
         <div className="flex items-center space-x-2">
           <Terminal className="w-4 h-4 text-cyber-green" />
@@ -123,7 +120,6 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
         </div>
       </div>
 
-      {/* Terminal body */}
       <div
         ref={terminalRef}
         className="flex-1 p-4 overflow-y-auto scrollbar-custom bg-slate-950/50 font-mono"
@@ -134,7 +130,7 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
             <p className="text-sm">Awaiting file upload...</p>
             <p className="text-xs mt-1">
               {analysisMode === 'v2'
-                ? '3 AI agents will activate upon analysis'
+                ? '4 AI agents will activate upon analysis'
                 : 'AI agent will activate upon analysis'}
             </p>
           </div>
@@ -146,7 +142,6 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
 
           return (
             <div key={idx} className="mb-4">
-              {/* Agent header badge (v2 mode) */}
               {colors && (
                 <div className={`flex items-center gap-2 mb-2 px-3 py-1.5 rounded border ${colors.border} ${colors.bg}`}>
                   <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
@@ -155,22 +150,25 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
                   </span>
                 </div>
               )}
-              {/* Agent text */}
-              <pre className={`text-sm whitespace-pre-wrap font-sans break-words m-0 pl-1 ${
-                colors ? colors.text.replace('text-', 'text-').replace('-400', '-200') : 'text-slate-300'
-              }`}
-                style={{ color: undefined }}
-              >
-                <span className={colors ? '' : 'text-slate-300'}>
+              {colors && analysisMode === 'v2' ? (
+                <div className="flex items-center gap-2 pl-1 text-sm text-slate-300">
+                  {seg.status === 'done' ? (
+                    <CheckCircle2 className={`w-4 h-4 ${colors.text}`} />
+                  ) : (
+                    <Activity className={`w-4 h-4 animate-pulse ${colors.text}`} />
+                  )}
+                  <span>{seg.agentName} {seg.status === 'done' ? 'completed' : 'is working...'}</span>
+                </div>
+              ) : (
+                <pre className="text-sm whitespace-pre-wrap font-sans break-words m-0 pl-1 text-slate-300">
                   {seg.text}
-                </span>
-              </pre>
+                </pre>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Report download */}
       {reportDownloadUrl && (
         <div className="px-4 py-3 border-t border-zinc-800 bg-cyber-green/10">
           <a
@@ -186,13 +184,12 @@ const LiveTerminal = ({ isActive, fileId, analysisMode }) => {
         </div>
       )}
 
-      {/* Status bar */}
       <div className="px-4 py-2 border-t border-zinc-800 bg-slate-950">
         <div className="flex items-center space-x-2 text-xs text-slate-600">
           <div className="w-2 h-2 rounded-full bg-zinc-700"></div>
           <span>
             {currentAgent
-              ? `${currentAgent.name} streaming...`
+              ? `${currentAgent.name} working...`
               : hasContent
                 ? 'Analysis complete'
                 : 'System ready'}
