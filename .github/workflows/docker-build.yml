@@ -1,0 +1,60 @@
+# Builds the Docker image on every pull request and smoke-tests the container.
+# No secrets are used: the test container gets throwaway random values generated in the job.
+name: Docker build
+
+on:
+  pull_request:
+    paths:
+      - 'project/**'
+      - '.github/workflows/docker-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./project
+          load: true
+          push: false
+          tags: threatlens:ci
+
+      - name: Refuses to start without secrets
+        run: |
+          if docker run --rm threatlens:ci; then
+            echo "Expected the container to refuse to start without ADMIN_PIN, ADMIN_API_KEY and API_KEY"
+            exit 1
+          fi
+
+      - name: Starts and serves the UI
+        run: |
+          docker run -d --name tl -p 5000:5000 \
+            -e ADMIN_PIN="$(openssl rand -hex 4)" \
+            -e ADMIN_API_KEY="$(openssl rand -hex 16)" \
+            -e API_KEY="$(openssl rand -hex 16)" \
+            threatlens:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5000/ -o /tmp/index.html && break
+            sleep 1
+          done
+          grep -q '<div id="root">' /tmp/index.html
+
+      - name: Oversized upload returns 413 JSON
+        run: |
+          head -c 11534336 /dev/zero > /tmp/big.bin
+          code=$(curl -s -o /tmp/resp.json -w '%{http_code}' -F "file=@/tmp/big.bin;filename=big.bin" http://127.0.0.1:5000/upload)
+          test "$code" = 413
+          grep -q 'File too large' /tmp/resp.json
+
+      - name: Container logs
+        if: failure()
+        run: docker logs tl || true

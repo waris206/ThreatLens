@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Lock, X } from 'lucide-react';
+import { API_URL } from '../../config';
 
 const AdminLogin = ({ onAuthenticated, onClose }) => {
   const [pin, setPin] = useState('');
@@ -10,7 +11,7 @@ const AdminLogin = ({ onAuthenticated, onClose }) => {
     setStatus('checking');
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const apiUrl = API_URL;
       const response = await fetch(`${apiUrl}/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

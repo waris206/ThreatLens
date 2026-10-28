@@ -5,6 +5,7 @@ import FileDetailsCard from './components/FileDetailsCard';
 import LiveTerminal from './components/LiveTerminal';
 import InvestigationTimeline from './components/InvestigationTimeline';
 import AdminPortal from './components/admin/AdminPortal';
+import { API_URL } from './config';
 
 function App() {
   const [uploadedFile, setUploadedFile] = useState(null);
@@ -23,7 +24,7 @@ function App() {
     formData.append('mode', analysisMode);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const apiUrl = API_URL;
       const endpoint = inputType === 'email' ? '/analyze/email' : '/upload';
       const response = await fetch(`${apiUrl}${endpoint}`, {
         method: 'POST',
@@ -31,7 +32,8 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+        const detail = await response.json().then((body) => body?.error, () => null);
+        throw new Error(detail || `Upload failed: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();

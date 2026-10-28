@@ -1,0 +1,37 @@
+# systemd unit for the ThreatLens backend (serves the UI and the API on 127.0.0.1:5000).
+#
+# Install:  1. create a user:   useradd --system --home /opt/threatlens --shell /usr/sbin/nologin threatlens
+#           2. put the repo in /opt/threatlens (so the app is /opt/threatlens/project), run "npm ci && npm run build" in project/
+#           3. fill /opt/threatlens/project/.env   (chmod 600, owned by threatlens), then create the reports folder:
+#                install -d -o threatlens -g threatlens /opt/threatlens/project/uploads
+#              (it must exist before the first start: ProtectSystem=strict + ReadWritePaths fail with status=226/NAMESPACE otherwise)
+#           4. install -m 644 deploy/threatlens.service /etc/systemd/system/threatlens.service
+#           5. systemctl daemon-reload && systemctl enable --now threatlens
+# Check:    systemctl status threatlens   |   journalctl -u threatlens -f
+# Node must be 20.19+ or 22.12+; adjust ExecStart if node is not in /usr/bin (see "which node").
+
+[Unit]
+Description=ThreatLens malware triage backend
+After=network.target
+
+[Service]
+Type=simple
+User=threatlens
+Group=threatlens
+WorkingDirectory=/opt/threatlens/project
+EnvironmentFile=/opt/threatlens/project/.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/threatlens/project/uploads
+
+[Install]
+WantedBy=multi-user.target

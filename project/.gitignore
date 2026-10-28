@@ -55,7 +55,7 @@ desktop.ini
 # Uploads directory (contains user-uploaded files and generated reports)
 uploads/
 *.pdf
-*.html
+# index.html (Vite entry) must be tracked; generated reports are covered by uploads/ and report-*.html
 report-*.html
 report-*.pdf
 

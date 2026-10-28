@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal, Activity, Download, CheckCircle2 } from 'lucide-react';
+import { API_URL } from '../config';
 
 const AGENT_COLORS = {
   1: { label: 'Agent 1 - Static Analyst', text: 'text-cyan-400', border: 'border-cyan-400/40', bg: 'bg-cyan-400/5', dot: 'bg-cyan-400' },
@@ -23,7 +24,7 @@ const LiveTerminal = ({ isActive, analysisMode }) => {
   }, [isActive]);
 
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const apiUrl = API_URL;
     const eventSource = new EventSource(`${apiUrl}/api/swarm-stream`);
 
     eventSource.onmessage = (event) => {

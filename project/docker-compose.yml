@@ -1,0 +1,18 @@
+# Quick start:  cp .env.example .env   (add your API keys)   then:  docker compose up -d --build
+# Open http://127.0.0.1:5000
+# For HTTPS put a reverse proxy in front (see README), keep the port bound to 127.0.0.1,
+# and set SERVER_URL / TRUST_PROXY in .env.
+services:
+  threatlens:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - reports:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  reports:
