@@ -190,7 +190,7 @@ docker compose up -d --build
 
 Open `http://127.0.0.1:5000`. The container serves the UI and the API from one process, and reports are kept in a Docker volume.
 
-> **Status: untested.** The Docker setup has not been built by the maintainer yet. The workflow in [`.github/workflows/docker-build.yml`](.github/workflows/docker-build.yml) builds the image and smoke-tests it on every pull request; this note will be removed once that passes. If you hit a problem, please open an issue.
+> The Docker image is built and smoke-tested by [GitHub Actions](.github/workflows/docker-build.yml) on every pull request. If you hit a problem, please open an issue.
 
 ### Without Docker (behind Apache, nginx or Caddy)
 
