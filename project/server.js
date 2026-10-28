@@ -25,15 +25,53 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 5000;
+
+// Behind a reverse proxy (Apache, nginx, Caddy) set TRUST_PROXY so rate limiting sees the real client IP.
+// Accepts a hop count ("1"), "loopback", "uniquelocal" or a comma-separated list of IPs/CIDRs.
+if (process.env.TRUST_PROXY) {
+  const tp = process.env.TRUST_PROXY.trim();
+  app.set('trust proxy', /^\d+$/.test(tp) ? Number(tp) : tp);
+}
+const PORT = Number(process.env.PORT) || 5000;
+const HOST = process.env.HOST || '';
 
 // Load environment variables
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;
+// Base for report download links. Behind a proxy set SERVER_URL=https://your-host.
+// In production without SERVER_URL the links are relative, which works because this process serves the UI too.
+const REPORT_BASE = process.env.SERVER_URL || (process.env.NODE_ENV === 'production' ? '' : SERVER_URL);
 const VIRUSTOTAL_API_KEY = process.env.VIRUSTOTAL_API_KEY;
-const ADMIN_PIN = process.env.ADMIN_PIN || '1337';
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || crypto.randomBytes(32).toString('hex');
+const ADMIN_PIN = process.env.ADMIN_PIN || '';
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 const PUBLIC_API_KEY = process.env.API_KEY || '';
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB max (demo-safe for public deployment)
+
+// Refuse to start with missing, short or well-known placeholder secrets (no built-in default PIN or keys).
+const KNOWN_DEFAULT_SECRETS = new Set([
+  '1337', '1234', '0000', '123456', 'admin', 'password', 'changeme',
+  'your_admin_key_here', 'your_public_api_key_here',
+  'generate_a_long_random_admin_key', 'generate_a_long_random_headless_api_key',
+]);
+const secretProblems = [];
+for (const [name, value, minLength] of [
+  ['ADMIN_PIN', ADMIN_PIN, 6],
+  ['ADMIN_API_KEY', ADMIN_API_KEY, 16],
+  ['API_KEY', PUBLIC_API_KEY, 16],
+]) {
+  if (!value) secretProblems.push(`${name} is not set`);
+  else if (KNOWN_DEFAULT_SECRETS.has(value.toLowerCase())) secretProblems.push(`${name} is a known default or placeholder value`);
+  else if (value.length < minLength) secretProblems.push(`${name} must be at least ${minLength} characters`);
+}
+if (ADMIN_API_KEY && ADMIN_API_KEY === PUBLIC_API_KEY) secretProblems.push('ADMIN_API_KEY and API_KEY must be different');
+if (secretProblems.length) {
+  console.error(
+    'ThreatLens refuses to start:\n' +
+    secretProblems.map((p) => `  - ${p}`).join('\n') +
+    '\nSet ADMIN_PIN, ADMIN_API_KEY and API_KEY in project/.env (for example: openssl rand -hex 4 for the PIN, openssl rand -hex 16 for each key).'
+  );
+  process.exit(1);
+}
 
 const analysisStore = new Map();
 
@@ -252,7 +290,7 @@ Respond in a professional, investigative tone.`;
           try {
             const htmlReport = generateHTMLReport(fullReport);
             fs.writeFileSync(reportPath, htmlReport, 'utf8');
-            const downloadUrl = `${SERVER_URL}/uploads/${reportFilename}`;
+            const downloadUrl = `${REPORT_BASE}/uploads/${reportFilename}`;
             streamResponse.write(`event: fileReady\ndata: ${JSON.stringify({ url: downloadUrl })}\n\n`);
           } catch (writeErr) {
             console.error('Report write error:', writeErr);
@@ -277,7 +315,7 @@ Respond in a professional, investigative tone.`;
             try {
               const htmlReport = generateHTMLReport(fullReport);
               fs.writeFileSync(reportPath, htmlReport, 'utf8');
-              const downloadUrl = `${SERVER_URL}/uploads/${reportFilename}`;
+              const downloadUrl = `${REPORT_BASE}/uploads/${reportFilename}`;
               streamResponse.write(`event: fileReady\ndata: ${JSON.stringify({ url: downloadUrl })}\n\n`);
             } catch (writeErr) {
               console.error('Report write error:', writeErr);
@@ -623,7 +661,7 @@ Format professionally with clear sections. This is the official forensic report.
   try {
     const htmlReport = generateHTMLReport(fullReport);
     fs.writeFileSync(reportPath, htmlReport, 'utf8');
-    const downloadUrl = `${SERVER_URL}/uploads/${reportFilename}`;
+    const downloadUrl = `${REPORT_BASE}/uploads/${reportFilename}`;
     streamResponse.write(`event: fileReady\ndata: ${JSON.stringify({ url: downloadUrl })}\n\n`);
   } catch (writeErr) {
     console.error('Report write error:', writeErr);
@@ -649,7 +687,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10 MB max (demo-safe for public deployment)
+    fileSize: MAX_UPLOAD_BYTES,
     files: 1
   }
 });
@@ -1204,4 +1242,37 @@ app.post('/api/v1/scan', apiLimiter, requirePublicApiKey, upload.single('file'),
   }
 });
 
-app.listen(PORT, () => console.log(`ThreatLens API Server running on http://localhost:${PORT}`));
+// Serve the built UI (npm run build -> dist/) from the same process, after all API routes.
+const distDir = join(__dirname, 'dist');
+if (fs.existsSync(join(distDir, 'index.html'))) {
+  app.use(express.static(distDir));
+  console.log(`Serving UI from ${distDir}`);
+}
+
+// Last middleware: JSON errors instead of Express's HTML error page (oversized upload -> 413, not 500).
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: `File too large. Maximum size is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+        maxBytes: MAX_UPLOAD_BYTES,
+      });
+    }
+    return res.status(400).json({ error: `Upload rejected: ${err.message}` });
+  }
+  if (err.status === 413 || err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large.' });
+  }
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+fs.mkdirSync(join(__dirname, 'uploads'), { recursive: true });
+
+const onListen = () => console.log(`ThreatLens API Server running on http://${HOST || 'localhost'}:${PORT}`);
+if (HOST) app.listen(PORT, HOST, onListen);
+else app.listen(PORT, onListen);

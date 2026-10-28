@@ -29,7 +29,7 @@ ThreatLens is a full-stack, real-time malware triage platform that automates fil
 
 ### SOC Admin PIN
 
-The SOC Portal button opens the admin dashboard login. The PIN is controlled by `ADMIN_PIN` in `project/.env`; if it is not set, local development defaults to `1337`. The PIN is only for the browser login gate. Admin API calls use `ADMIN_API_KEY`, which should be set to a long random value in production.
+The SOC Portal button opens the admin dashboard login. The PIN is controlled by `ADMIN_PIN` in `project/.env`. There is no built-in default: `ADMIN_PIN` (6+ characters), `ADMIN_API_KEY` and `API_KEY` (16+ characters each, different from each other) are required, and the server refuses to start with a clear error if any is missing, too short, or a known placeholder. The PIN is only for the browser login gate; admin API calls use `ADMIN_API_KEY`.
 
 Never commit `project/.env`. It is ignored by Git and should hold real API keys, webhook URLs, and private admin/API secrets.
 
@@ -133,6 +133,8 @@ cd ThreatLens/project
 
 
 
+> Requires Node.js 20.19+ (or 22.12+).
+
 ### 2. Install Dependencies
 
 ```bash
@@ -148,9 +150,9 @@ OPENROUTER_API_KEY=your_openrouter_key
 VIRUSTOTAL_API_KEY=your_virustotal_key
 YARAIFY_AUTH_KEY=your_yaraify_auth_key
 MALWAREBAZAAR_AUTH_KEY=your_malwarebazaar_auth_key
-ADMIN_PIN=1337
-ADMIN_API_KEY=generate_a_long_random_admin_key
-API_KEY=generate_a_long_random_headless_api_key
+ADMIN_PIN=          # openssl rand -hex 4
+ADMIN_API_KEY=      # openssl rand -hex 16
+API_KEY=            # openssl rand -hex 16
 SLACK_WEBHOOK_URL=
 DISCORD_WEBHOOK_URL=
 ```
@@ -172,6 +174,47 @@ npm run dev
 ```
 
 Frontend runs on `http://localhost:5173`
+
+---
+
+## Docker / Production / HTTPS
+
+### Quick start with Docker
+
+```bash
+git clone https://github.com/waris206/ThreatLens.git
+cd ThreatLens/project
+cp .env.example .env        # add your API keys and set ADMIN_PIN, ADMIN_API_KEY, API_KEY (required)
+docker compose up -d --build
+```
+
+Open `http://127.0.0.1:5000`. The container serves the UI and the API from one process, and reports are kept in a Docker volume.
+
+> **Status: untested.** The Docker setup has not been built by the maintainer yet. The workflow in [`.github/workflows/docker-build.yml`](.github/workflows/docker-build.yml) builds the image and smoke-tests it on every pull request; this note will be removed once that passes. If you hit a problem, please open an issue.
+
+### Without Docker (behind Apache, nginx or Caddy)
+
+Requires **Node.js 20.19+ or 22.12+** (Debian's `apt` Node 18 is too old for the Vite build).
+
+```bash
+cd project
+npm ci
+npm run build
+cp .env.example .env        # keys, plus the deployment settings below
+NODE_ENV=production HOST=127.0.0.1 node server.js
+```
+
+The backend now serves `dist/` itself on port 5000. The build calls the same origin it was loaded from, so no `VITE_API_URL` is needed. Point your reverse proxy at it. For Apache (`a2enmod ssl proxy proxy_http headers rewrite`) a ready-to-edit single-vhost config is in [`deploy/apache-threatlens.conf`](deploy/apache-threatlens.conf), and a systemd unit in [`deploy/threatlens.service`](deploy/threatlens.service). One `ProxyPass /` is enough because the backend serves both the UI and the API.
+
+In `.env` set `SERVER_URL=https://threatlens.example.internal` and `TRUST_PROXY=loopback` (so rate limiting sees real client IPs). The live agent stream (SSE) works through plain `mod_proxy_http`; if you add response buffering or compression in front of `/api/swarm-stream`, disable it for that path.
+
+| Variable | Purpose |
+|---|---|
+| `PORT` / `HOST` | Listen port (default 5000) / bind address (default all interfaces) |
+| `SERVER_URL` | Public URL used in report download links |
+| `TRUST_PROXY` | Express `trust proxy` setting when behind a reverse proxy (`loopback`, `1`, a CIDR list) |
+| `ALLOWED_ORIGINS` | Only needed if the UI is served from a different origin than the API |
+| `VITE_API_URL` | Build-time override for a separate API origin (empty/unset = same origin) |
 
 ---
 

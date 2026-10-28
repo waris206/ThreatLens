@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldX, X } from 'lucide-react';
 import AdminStatsBar from './AdminStatsBar';
 import ThreatFeed from './ThreatFeed';
+import { API_URL } from '../../config';
 
 const riskStyle = {
   HIGH: 'text-red-400',
@@ -14,7 +15,7 @@ const AdminDashboard = ({ adminKey, onClose }) => {
   const [stats, setStats] = useState(null);
 
   const load = async () => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const apiUrl = API_URL;
     const headers = { 'X-Admin-Key': adminKey };
     const [analysesRes, statsRes] = await Promise.all([
       fetch(`${apiUrl}/admin/analyses`, { headers }),
@@ -31,7 +32,7 @@ const AdminDashboard = ({ adminKey, onClose }) => {
   }, [adminKey]);
 
   const quarantine = async (analysisId) => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const apiUrl = API_URL;
     await fetch(`${apiUrl}/admin/quarantine/${analysisId}`, {
       method: 'POST',
       headers: { 'X-Admin-Key': adminKey },
